@@ -7,11 +7,11 @@ import torchmetrics
 from torchmetrics import MetricCollection
 from torchmetrics.classification import BinaryJaccardIndex, BinaryF1Score, BinaryAccuracy
 
+
 class SegmentationModule(pl.LightningModule):
-    def __init__(self, model, preprocess, loss, learning_rate = 3e-4, batch_size = 32):
+    def __init__(self, model, loss, learning_rate = 3e-4, batch_size = 32):
         super().__init__()
         self.model = model
-        self.preprocess_fn = preprocess
 
         assert loss in ["dice", "iou", "bce"]
         if loss == "dice":
@@ -40,16 +40,19 @@ class SegmentationModule(pl.LightningModule):
         mask = self.model(batch) 
         return mask
         
-    def training_step(self, batch, batch_idx):
+    def _shared_forward_pass(self, batch):
         scene, mask = batch
         pred_mask = self.model(scene)
+        return pred_mask, mask
+
+    def training_step(self, batch, batch_idx):
+        pred_mask, mask = self._shared_forward_pass(batch)
         loss = self.loss(pred_mask, mask) 
         self.log("train/loss", loss.item(), on_epoch = True, on_step=True, prog_bar=True)
         return loss
     
     def validation_step(self, batch, batch_idx):
-        scene, mask = batch
-        pred_mask = self.model(scene)
+        pred_mask, mask = self._shared_forward_pass(batch)
         loss = self.loss(pred_mask, mask)
         self.log("val/loss", loss.item(), on_epoch=True)
 
@@ -57,8 +60,7 @@ class SegmentationModule(pl.LightningModule):
         self.log_dict(self.val_metrics, on_epoch=True)
 
     def test_step(self, batch, batch_idx):
-        scene, mask = batch
-        pred_mask = self.model(scene)
+        pred_mask, mask = self._shared_forward_pass(batch)
         loss = self.loss(pred_mask, mask)
         self.log("test/loss", loss.item(), on_epoch=True)
 

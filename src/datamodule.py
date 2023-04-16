@@ -15,8 +15,8 @@ root -> tiled -> tile_shape -> test -> scene, mask
 root -> images, gt
 '''
 
-class InariaDataset(Dataset):
-    def __init__(self, root, split = "train", scene_transforms = None, mask_transforms = None):
+class InriaDataset(Dataset):
+    def __init__(self, root, split = "train", preprocess_fn = None, scene_transforms = None, mask_transforms = None):
         super().__init__()
 
         self.root:Path = root
@@ -39,6 +39,7 @@ class InariaDataset(Dataset):
         self.masks:Path = list(self.masks_dir.iterdir())
 
         #Transforms
+        self.preprocess_fn = preprocess_fn
         self.scene_transforms = scene_transforms
         self.mask_transforms = mask_transforms
 
@@ -49,13 +50,20 @@ class InariaDataset(Dataset):
         scene = self._load_raster(self.scenes[idx])
         mask = self._load_raster(self.masks[idx])
 
+        if self.preprocess_fn is not None:
+            scene = self.preprocess_fn(scene.permute(2, 1, 0))
+            scene = scene.permute(2, 0, 1).float()
+        else:
+            scene = scene / 255.
+
         if self.scene_transforms is not None:
-            scene = self.scene_transforms(scene.to(torch.float))
+            scene = self.scene_transforms(scene)
         if self.mask_transforms is not None:
             mask = self.mask_transforms(mask)
         
-        mask = torch.clip(mask, 0., 1.).to(torch.int)
-        scene = scene / 255.
+        mask = torch.clip(mask, 0., 1.).int()
+        #scene = scene.to(torch.float)
+        #scene = scene / 255.
         return scene, mask
 
     def _load_raster(self, path):
@@ -63,8 +71,8 @@ class InariaDataset(Dataset):
             return torch.from_numpy(raster.read())
 
 
-class InariaDataModule(pl.LightningDataModule):
-    def __init__(self, root:Path, batch_size:int = 32, tile_shape = (512, 512), num_workers = 16):
+class InriaDataModule(pl.LightningDataModule):
+    def __init__(self, root:Path, preprocess_fn = None, batch_size:int = 32, tile_shape = (512, 512), num_workers = 16):
         super().__init__()
         #Paths
         self.root:Path = root
@@ -85,20 +93,22 @@ class InariaDataModule(pl.LightningDataModule):
         self.num_workers = num_workers
 
         self.tiled_dir = self.root.parent / "tiled" / f"{self.tile_shape[0]}x{self.tile_shape[1]}"
+
+        self.preprocess_fn = preprocess_fn
      
     def prepare_data(self):
         if not self._check_dirs():
             print("Tiled Directories Not Found")
             self._create_dirs()
             self._tile() 
-        InariaDataset(self.tiled_dir)
+        InriaDataset(self.tiled_dir)
 
     def setup(self, stage):
         if stage == "fit" or stage == "validate":
-            dataset = InariaDataset(self.tiled_dir, split = "train")
+            dataset = InriaDataset(self.tiled_dir, split = "train", preprocess_fn = self.preprocess_fn)
             self.train_dataset, self.val_dataset = torch.utils.data.random_split(dataset, [.8, .2])
         elif stage == "test" or stage == "predict":
-            self.test_dataset = InariaDataset(self.tiled_dir, split = "test")
+            self.test_dataset = InriaDataset(self.tiled_dir, split = "test", preprocess_fn = self.preprocess_fn)
     
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle = True, num_workers = self.num_workers)
