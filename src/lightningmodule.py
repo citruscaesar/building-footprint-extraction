@@ -35,6 +35,12 @@ class SegmentationModule(pl.LightningModule):
             BinaryAccuracy()
         ], prefix = "Test ")
 
+        self.pred_metrics = MetricCollection([
+            BinaryF1Score(),
+            BinaryJaccardIndex(),
+            BinaryAccuracy()
+        ], prefix = "Pred ")
+
 
     def forward(self, batch):
         mask = self.model(batch) 
@@ -66,6 +72,10 @@ class SegmentationModule(pl.LightningModule):
 
         self.test_metrics.update(pred_mask, mask)
         self.log_dict(self.test_metrics, on_epoch=True)
+
+    def predict_step(self, batch, batch_idx):
+        pred_mask, mask = self._shared_forward_pass(batch)
+        return pred_mask, mask
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.model.parameters(), lr = self.hparams.learning_rate)
